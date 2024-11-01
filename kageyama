@@ -1,0 +1,489 @@
+from pyspark.sql import SparkSession
+import os
+
+from pyspark.sql.functions import col, get_json_object, lit, max
+
+import time
+
+from datetime import datetime, timedelta
+
+import utils.mercury_utils as util_mysql_mercury
+
+import subprocess
+
+env os.environ
+
+#MySQL Parameter
+
+mysql_driver= env ["MYSQL_DRIVER"]
+
+mysql_hostname =env ["MYSQL_HOSTNAME"]
+
+mysql_jdbc_port= env ["MYSQL JDBC_PORT"]
+
+metadata_db_name = env ["METADATA_DB_NAME"]
+
+policy_db_name= env ["POLICY_DB_NAME"]
+
+mysql_user =env ["MYSQL_USER"]
+
+mysql_credential_name= env ["MYSQL CREDENTIAL NAME"]
+
+jceks_hdfs_path =env ["JCERS_HDFS_PATH"] 
+#HDFS Extraction parameters
+
+event_tables_list =env["EVENT_TABLES_LIST"]
+metadata_tables_list = env["METADATA_TABLES_LIST"]
+
+policy_parent_hdfs_path =env ["POLICY_HDF3_PATH"]
+ metadata_parent_hdfs_path =env ["METADATA_HDFS_PATH"]
+
+db_entity_table =env ["DB_ENTITY_TABLE"]
+
+db_attribute_table= env ["DB_ATTRIBUTE_TABLE"]
+
+temp_local_path=env["POLICY_DDL_LOCAL_PATH"]
+
+event_date_column-env ["EVENT_DATE_COLUMN"]
+
+mcsk_path=env ["MSCK_REPAIR_SINGLE_HIVE_TABLE_FILE"]
+
+hive_db_name=env["HIVE_DB"]
+curdir=os.path.dirname(os.path.abspath(__file__))
+py_parent_path =os.path.dirname (curdir)
+
+def subprocess_execute (commands):
+
+   for exec command in commands:
+
+      subp_command= exec_command.split()
+
+      try:
+
+        subprocess_proc =subprocess. Popen (subp_command) 
+        subprocess proc.communicate() 
+        if subprocess_proc.returncode == 0: 
+            print("Success: Executed (0)".format(subp_command)) 
+     except subprocess.Called ProcessError as e:
+
+          print("Error executing command (0): (1)".format(subp_command, 2))
+
+          return 1
+
+    return 0
+
+### 2 TO CHANGE: NOT NECESSARY TO HAVE THIS FUNCTION IF THE HqL STRING IS EXECUTING.
+
+def execute_hive_hql (ddl_exec_path, data_hdfs_path,mysql_table,hive_table):
+  
+
+'''Execute .hql file in specified directory.'''
+    if 
+
+
+    print("Executing hal files in directory.format()".format(ddl_exec_path))
+
+    #Loop through all hql files in the directory and execute them
+
+     if ddl_exec_path.endswith(".hql"):
+
+        beeline_command "beeline f (0) -v db_name={1} -v envpath=(2)".format (ddl_exec_path,hive_db_name,data_hdfs_path)
+
+        print("Executing HQL file: (0)".format(ddl_exec_path))
+
+        subprocess_retval=subprocess_execute([beeline_command])
+
+        if subprocess_retval=0:
+
+            print ("Successfully executed DDL and MSCK repair commands")
+
+        else:
+
+            print("Failure: execution DDL and MSCK repair commands")
+		
+##3 TO CHANGE: WRITE THE FILE IN HDFS ITSELF INSTEAD OF LOCAL BECAUSE WE ARE ALREADY EXECUTING THE HIVE HQL COMMAND USING SPARK Sql
+def copy_to_hdfs(local_path,hdfs_path):
+
+    command="hdfs dfs -copyFromLocal (0) (1)".format(local_path,hdfs_path)
+
+   #executing the command for subprocessing
+
+   subprocess_execute (command)
+
+   if subprocess retval = 0:
+
+      print("Successfully copied to HDFS: (0)".fromat (hdfs_path))
+  else:
+      print ("Failure: Copy to HDFS: {0}".format(hdfs_path))
+
+#One time metadata extract with overwriting.
+def one_time_metadata_extract (spark, raw_data, metadata_hdfs_path, metadata_table,metadata_table_hive_name, metadata_proj_path_file, metadata_ddl_hdfs_path):
+    print("Started: Writing historical data for metadata table: "+str(metadata_table)) extracted_df raw_data.na.fill("null")
+    extracted_df.write.format("parquet").mode ("overwrite").save (metadata_hdfs_path)
+    print("Completed: Writing historical data for metadata table: "+str(metadata_table))
+    #copy the metadata project files from local to HDFS
+    execute_hive_hql (metadata_proj_path_file, metadata_hdfs_path, metadata_table, metadata_table_hive_name)
+    copy_to_hdfs (metadata_proj_path_file, metadata_ddl_hdfs_path)
+    print("Completed: One_time_metadata_ extraction and execution for ()".format(some_value))
+
+def run_daily_metadata_extract (spark, hdfs_metadata_df, raw_data, metadata_hdfs_path, metadata_table):
+     print("Writing daily Metadata changes (0) Started".format (metadata_table))
+
+    # Compare the 2 dataframes passed and returns the difference
+
+     print ("Finding the difference between Dataframes -Started")
+
+     difference_df = raw data.subtract (hdfs_metadata_df)
+
+     print("Difference between 2 dataframes"+ str(difference_df.count()))
+
+    print ("Finding the difference between Dataframes. Completed")
+
+    if (difference_df.count()!=0):
+
+       difference_df.write.format("parquet").mode("append").save (metadata_hdfs_path)
+
+    print("Writing daily Metadata changes (0) Completed".format (metadata_table))
+	
+
+One time policy extract with overwriting. #
+
+def one_time_policy_extract (spark, policy_mysql_df, policy_hdfs_path, policy_table, entity_table_df, attribute_table_df,
+                               mysql_df_columns, policy_temp_local_path, ddl_hdfs_path, policy_temp_hdfs_path, policy_table_hive_name):
+
+   # Extract HIVE Table DDL Query
+
+    comments_dict=extract_policy_comments (spark, entity_table_df, attribute_table_df, policy_table)
+
+    hive_query_to_save=create_write_table_query(mysql_df_columns, policy_table, comments_dict)
+    try:
+       df1=spark.sql(hive_query_to_save)
+       df1.write.format(parquet).mode("overwrite").save(hdfs_path)
+    except exception as e:
+        print("the failed the {e}")
+    ## 4 TO CHANGE: write the query in hdfs path itself instead of using write to local function.
+
+     write_hql_query_to_local (hive_query_to_save, policy_temp_local_path, policy_table, ddl_hdfs_path) #Write Data in Partitions
+
+    print("Writing historical data for policy table: "+str(policy_table))
+
+    extracted_df = policy_mysql_df.na.fill("null")
+
+    extracted_df.write.format("parquet").mode ("overwrite").save (policy_temp_hdfs_path)
+
+    rewrite_df=spark.read.parquet (policy_temp_hdfs_path)
+
+    rewrite_df.write.format("parquet").mode ("overwrite").partitionBy("event_date").save (policy_hdfs_path)
+
+    print("Successful: Writing historical data for policy table:"+str(policy_table))
+
+    #Empty out the temporary hdfs path
+
+    print("{0): Emptying out the Temporary HDFS Path".format (policy_table))
+
+    execute_hive_hql (policy_temp_local_path, data_hdfs_path, policy_table, policy_table_hive_name) 
+	copy_to_hdfs (policy_temp_local_path,ddl_hdfs_path)
+
+    print("Completed copy from local {) to hdfs (}".format(policy_temp_local_path,policy_temp_hdfs_path))
+
+    policy_temp_hdfs_path=policy_temp_hdfs_path+'/*'
+    temp_delete_proc = subprocess. Popen(['hdfs', 'dfs', '-rm', '-r', policy_temp_hdfs_path])
+   temp_delete_proc.communicate()
+   if temp_delete_proc.returncode == 0:
+       print("Deleted the parititons at the temp hdfs location: (0)".format (policy_temp_hdfs_path))
+   else:
+     print("Cannot delete the parititons at the temp hdfs location: (0)".format(policy_temp_hdfs_path)) print("Completed: Writing historical data for policy table: "+str(policy_table)) 
+	 
+###hive-ddl functionality
+
+def extract_policy_comments(spark, entity_table_df, attribute_table_df, policy_table):
+
+  print("HIVE Table Comments from MySQL Attribute table, (0): Started".format(policy_table)) 
+  entity_table_df.createOrReplaceTempView("entity_table_df") 
+  attribute_table_df.createOrReplaceTempView("attribute_table_df")
+
+  policy_comments_df=spark.sql("\SELECT atd.atrbte_name,atd.atrbte desc from attribute table_df atd INNER JOIN entity_table_df etd
+  \ ON atd.db_entity_id= etd.db_entity_id\
+  WHERE etd.entity_name = '{0}' \".format(policy_table)) 
+###convert into dictionary, key: attribute_name, value: attribute_description
+
+  policy_attribute_comments = dict(policy_comments_df.rdd.map(lambda x: (str(x.atrbte_name), str(x.atrbte_desc))).collect()) 
+  print("Completed: Comments for HIVE Tables from MySQL Attribute table, (0)".format(policy_table))
+
+  print("comments_dict is:(0)".format(policy_attribute_comments))
+
+  return policy_attribute_comments
+
+def create_write_table_query(mysql_df_columns, policy_table, comments_dict):
+
+   #initial query
+
+   drop_query= 'DROP TABLE IF EXISTS ((hivevar:db_name)).`ext_{0}';\n'.format(policy_table)
+
+   create_query_start = 'CREATE EXTERNAL TABLE IF NOT EXISTS ((hivevar:db_name}}.`ext_{0}(\n'.format(policy_table)
+
+   ##Column level query initiation
+
+   create query_remaining=""
+
+   for policy_column in mysql_df_columns: 
+        if policy_column==event_date_column:
+		      continue
+
+        create_query_remaining+="'{0}' string COMMENT '{1}', \n".format(policy_column,comments_dict [policy_column])
+
+       #removing the last comma 
+	create_query_remaining=create_query_remaining [:-2]+')\n'#Comment part of the query
+
+    create_query_comment = "COMMENT 'Standard Model Table for (0)'\n".format(policy_table)
+    #End part of the query.
+
+    create_quert_end = """PARTITIONED BY (event_date string) \n\
+
+    ROW FORMAT SERDE\n\
+
+           'org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe' \n\ 
+	STORED AS INPUTFORMAT\n\
+
+           'org.apache.hadoop.hive.ql.io.parquet. Mapred ParquetInputFormat'\n\
+
+    OUTPUT FORMAT\n\
+
+          'org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat'\n\
+
+    LOCATION\n\
+
+  '$ {{hivevar:envpath}}';\n"""
+
+   mcsk_repair_query="MSCK REPAIR TABLE ((hivevar:db_name))`.`ext_{0}';".format(policy_table)
+
+   hive_query=drop_query+create_query_start+create_query_remaining+create_query_comment+create_quert_end+mcak_repair_quezy
+
+  ## 1. TO CHANGE: Execute the hive_query using spark sql.
+   try:
+     df=spark.sql(hive_query)
+     print("Succesfull the execute the hive_qurey")
+   except  exception as e:
+     print("not Sucessfully excuted the hive_query")
+
+   print ("updated hive query for (0) is: \n{1}".format(policy_table, hive_query))
+   df.write.mode("overwrite").save(hdfs_path)
+
+  ## 1.1 TO CHANGE: write the query in hdfs path itself instead of using write to local function.
+
+return hive_query
+
+def write_hql_query_to_local (hive_query_to_save, policy_temp_local_path, policy_table, ddl_hdfs_path):
+
+    with open (policy_temp_local_path, 'wb') as fp: 
+	fp.write (str (hive_query_to_save))
+    print("Saved the DDL file for (0) at (1), bash script will move to (2)".format(policy_table, policy_temp_local_path, ddl_hdfs_path))
+def hdfs_ddl_check(policy_table, ddl_hdfs_path):
+#Write mode will overwrite the file if its present? 
+#fos sys check to see if any file exists
+   print("ddl_hdfs_path is: {0}".format(ddl_hdfs_path))
+
+   ddl_check_proc = subprocess.Popen(['hdfs', 'dfs', 'test', '-e', ddi_hdfs_path])
+
+   ddl_check_proc.communicate()
+
+   if ddl_check_proc.returncode == 0: 
+       print("{0} hive_ddl Exists at (1), Deleting".format(policy_table, ddl_hdfs_path))
+       ddl_hdfs_delete_proc = subprocess.Popen(['hdfs', 'dfs', '-rm', '-f', ddl_hdfs_path])
+       ddl_hdfs_delete_proc.communicate()
+       if ddl_hdfs_delete_proc.returncode == 0:
+        print("(0) hive_ddl Deleted at {1}".format (policy_table, ddl_hdfs_path))
+		
+
+#get the latest insert_timestamp of the hdfs and get the values in mysql policy table larger than that timestamp
+
+def compare_timestamps (hdfs_df, mysql_df):
+    hdfs_max_ts= (hdfs_df.select (max('insert_timestamp')).collect()) [0] [0]
+    print("maximum insert timestamp value on hdfs partitions:(0)".format(hdfs_max_ts))
+	extracted_df = mysql_df.where (col('insert_timestamp') > hdfs_max_ts)
+    print("extracted df: number of recorlis added to policy MySQL since the last HDFS extract: {0}".format(extracte_df.count())
+    return extracted_df
+
+#Daily Policy extract with timestamps comparison
+def run_daily_policy_extract (policy_hdfs_df, policy_mysql_df, policy_hdfs_path, policy_table):
+       print("Writing Daily Policy Data to Partitions Started")
+       #Invoke Compare timestampsfunction
+	   print("Insert_timestamp comparison for (0): Start".format (policy_table))
+
+       extracted_df = compare_timestamps (policy_hdfs_df, policy_mysql_df)
+
+       print("End: insert_timestamp comparison for {0}".format (policy_table)) 
+	   if extracted_df.count() != 0:
+           #Write the extracted_df to the hdfs policy table path 
+		  extracted_df = extracted_df.na.fill("null")
+          print("saving the added records to the hdfs path: (0)".format(policy_hdfs_path))
+          extracted_df.write.format("parquet").mode ("append").partitionBy("event_date").save(policy_hdfs_path)
+      print("Completed Writing Daily Policy Data to Partitions")
+
+#compare columns between the hdfs and mysql dataframe columns
+def column_comparison(hdfs_df_columns, mysql_df_columns):
+    diff list[]
+
+   for mysql column in mysql_df_columns:
+
+       if mysql_column not in hdfs_df_columns:
+
+            diff_list.append(mysql_column)
+
+    print("Additional columns added: (0)".format (len (diff_list)))
+	return diff_list
+
+def write policy_data_in_hdfs (spark, policy_mysql_df, entity_table_df, attribute_table_df,policy_hdfs_path, policy_table, policy_temp_local_path, ddl_hdfs_path,policy_temp_hdfs_path, policy_table_hive_name):
+
+    #Checking if the parquet path is empty. If so, one time extract will run.
+
+    #Same functionality for metadata table hdfs read.
+
+    mysql_df_columns=policy_mysql_df.columns
+
+    try:
+
+      policy_hdfs_df spark.read.parquet (policy_hdfs_path)
+
+    except Exception as e:
+
+       print("Exception, the HDFS folder is empty.")
+
+       print("Running the one-time policy extract for the HDFS ")
+
+       one_time_policy_extract (spark, policy_mysql_df, policy_hdfs_path, policy_table, entity_table_df, attribute_table_df, mysql_df_columns, policy_temp_local_path, 
+	                   ddl_hdfs_path,policy_temp_hdfs_path, policy_table_hive_name)
+	   return
+
+       hdfs_df_columns=policy_hdfs_df.columns
+
+       additional_columns column_comparison (hdfs_df_columns,mysql_df_columns)
+
+       if not additional columns:
+
+           print("No additional columns to be added to the dataframe for Hive today. Continuing with daily extract")
+
+           #writing policy data into hdfs
+
+           run_daily_policy_extract (policy_hdfs_df, policy_mysql_df, policy_hdfs_path, policy_table)
+
+          #emptying the hdfs folders
+
+           return
+
+       print("(0): The new additional columns to be added into HDFS Schema are, (1)".format(policy_table,additional_columns)) 
+	   
+       one_time_policy_extract (spark, policy_hdfs_df, policy_hdfs_path, policy_table, entity_table_df, attribute_table_df, mysql_df_columns, policy_temp_local_path, ddl_hdfs_path, policy_temp_hdfs_path, policy_table_hive_name)
+
+#Write Metadata in HDFS everytime a new value is given as an input. If the data cannot be read, one_time_extract of metadata is perfo 
+def write metadata_data_in_hdfs(spark, raw_data, metadata_hdfs_path, metadata_table, metadata_table_hive_name, metadata_proj_path_file, ddl_hdfs_path):
+#Checking if the parquet path is empty. If so, one time extract will run. 
+   print("Writing the metadata in hdfs for the (0): Start".format (metadata_table))
+   try:
+
+     metadata_hdfs_df = spark.read.parquet (metadata_hdfs_path)
+
+   except Exception as e:
+         print (e)
+
+         print("Exception, the HDFS folder is empty.")
+
+         print ("Running the one-time metadata extract for the HDFS ")
+
+         one_time_metadata_extract (spark, raw_data, metadata_hdfs_path, metadata_table, metadata_table_hive_name, metadata_proj_path_file,ddl_hdfs_path)
+
+         return
+
+   #Non empty parquet path. Daily extract will run.
+
+   print ("Count of the metadata in HDFS for (0): (1)".format (metadata_table, metadata_hdfs_df.count())) 
+   run_daily_metadata_extract (spark, metadata_hdfs_df, raw_data, metadata_hdfs_path, metadata_table)
+   print("Completed: Writing the metadata in hdfs for the (0)".format (metadata_table))
+
+def main():
+
+    spark SparkSession.builder.appName("Mercury_Daily_Extract").enableHiveSupport().getOrCreate ()
+
+    print("Spark Session Created")
+
+   #parameter configs
+
+   policy_jdbc_url = util_mysql_mercury.build_jdbc_url(mysql_hostname, mysql_jdbc_port, policy_db_name)
+
+   metadata_jdbc_url = util_mysql_mercury.build_jdbc_url (mysql_hostname, mysql_jdbc_port, metadata_db_name) 
+   clear_txt util_mysql_mercury.retrieve_cleartext (spark, jceks_hdfs_path, mysql_credential_name) 
+   #table names extraction
+   policy_tables = event_tables_list.split
+   metadata_tables=metadata_tables_list.split(",")
+   #metdata extract
+   print("Extracting the Metadata tables: Start")
+   for metadata_table in metadata_tables:
+     try:
+        result=subprocess.run(commnad)
+        if result.returncode=0:
+           print("command excuted sucessfully")
+           return 0
+        else:
+           print("commnad is not excuted sucessfully")
+     except Exception as e:
+           print("exception occured whle excutio commnad")
+
+      print("Start: (0), Exract for Metadata table".format(metadata_table))
+
+   metadata_table_mysqldf = util_mysql_mercury.read_mysql_table (spark,mysql_driver,metadata_jdbc_url, metadata_table, mysql_user, clear_txt)
+
+   if (metadata_table_mysqldf.count() == 0):
+
+      print("The metadata Level MySQL table has no data for (0)".format(metadata_table))
+
+      print ("Skipping the extraction for (0)".format(metadata_table))
+
+      continue
+
+    metadata_specific_hdfs_path = metadata_parent_hdfs_path+"/"+str(metadata_table)
+
+    metadata_hdfs_path = metadata_specific_hdfs_path+"/hive_table"
+
+   ddl_hdfs_path metadata_specific_hdfs_path+"/ddl_update_extract"
+
+   metadata table_hive_name="ext_"+str(metadata_table)+"_ddl"
+
+   hive_ddl_dir_path=py_parent_path+"/hive_ddls/metadata_ddle"
+
+   metadata_proj_path_file=hive_ddl_dir_path+"/"+str(metadata_table_hive_name)+".hql"
+
+   metadata_hdfs_path_file=ddl_hdfs_path+"/"+metadata_table_hive_name+".hql"
+
+   ###TO CHANGE: HAVE MSCK COMMAND REFLECT THE METADATA TABLE
+
+   #PASS THIS COMMAND AS AN ARGUMENT
+
+  # mack_command = "beeline -f (0) --hivevar db_name=(1) --hivevar table_name={2}".format(mcsk_path,hive_db_name, hive_table)
+   subprocess_execute([msck_command])
+   # RUN THIS COMMAND ON SUBPROCESS EXECUTE.
+
+   hdfs_ddl_check(metadata_table, metadata_hdfs_path_file)
+
+   write_metadata_data_in_hdfs (spark, metadata_table_mysqldf,metadata_hdfs_path, metadata_table,metadata_table_hive_name, metadata_proj_path_file, ddl_hdfs_path)
+
+ except Exception as e:
+
+   print (e)
+
+   error details = str(e)
+
+   process status = "Failed"
+
+   print("Error: "+error_details)
+   
+
+   print("Failed: (0), Exract for Metadata table". format (metadata_table)) print("Extracting the Metadata tables: Completed")
+
+
+
+   print("{0): Reading Entity Table for HIVE Table comments".format(db_entity_table))
+
+   entity_table_df = util_mysql_mercury.read_mysql_table (spark,mysql_driver, metadata_jdbc_url,db_entity_table, mysql_user, clear_txt)
+
+   print("{0) Reading Attribute Table for HIVE Table comments".format(db_attribute_table))
+
